@@ -154,11 +154,18 @@ _shell:
 	call _cmd_ProcessorType
 	call _hard_info
 	call _serial_ports
-	call _total_memory
-
+	call _memory
+	call _display_endl
+	call _display_endl
+	call _display_endl
+	mov si, strTitleDesign
+	mov al, 0x01
+	int 0x21
+	
 	
 	call _display_endl
 	jmp _cmd_done
+	ret
 	
 	_cmd_cpuVendorID:
 		call _display_endl
@@ -213,7 +220,86 @@ _shell:
 		ret
 		
 		
-	_total_memory:
+	_memory:
+		push ax
+		push bx
+		push cx
+		push dx
+		push es
+		push si
+
+		call _display_endl
+		mov si, strmemory	; Prints base memory string
+		mov al, 0x01
+		int 0x21
+		
+
+		; Reading Base Memory -----------------------------------------------
+		push ax
+		push dx
+		
+		int 0x12		; call interrupt 12 to get base mem size
+		mov dx,ax 
+		mov [basemem] , ax
+		call _print_dec		; display the number in decimal
+		mov al, 0x6b
+		mov ah, 0x0E            ; BIOS teletype acts on 'K' 
+		mov bh, 0x00
+		mov bl, 0x07
+		int 0x10
+		mov si, basemem	; Prints base memory string
+		mov al, 0x01
+		int 0x21
+		ret
+
+		
+		pop dx
+		pop ax
+
+		; Reading extended Memory
+		call _display_endl
+		mov si, strsmallextended
+		mov al, 0x01
+		int 0x21
+
+		xor cx, cx		; Clear CX
+		xor dx, dx		; clear DX
+		mov ax, 0xE801
+		int 0x15		; call interrupt 15h
+		mov dx, ax		; save memory value in DX as the procedure argument
+		mov [extmem1], ax
+		call _print_dec		; print the decimal value in DX
+		mov al, 0x6b
+		mov ah, 0x0E            ; BIOS teletype acts on 'K'
+		mov bh, 0x00
+		mov bl, 0x07
+		int 0x10
+
+		xor cx, cx		; clear CX
+		xor dx, dx		; clear DX
+		mov ax, 0xE801
+		int 0x15		; call interrupt 15h
+		mov ax, dx		; save memory value in AX for division
+		xor dx, dx
+		mov si , 16
+		div si			; divide AX value to get the number of MB
+		mov dx, ax
+		mov [extmem2], ax
+		push dx			; save dx value
+
+		call _display_endl
+		mov si, strbigextended
+		mov al, 0x01
+		int 0x21
+		
+		pop dx			; retrieve DX for printing
+		call _print_dec
+		mov al, 0x4D
+		mov ah, 0x0E            ; BIOS teletype acts on 'M'
+		mov bh, 0x00
+		mov bl, 0x07
+		int 0x10
+
 		call _display_endl
 		mov si, strtotalmemory
 		mov al, 0x01
@@ -231,8 +317,14 @@ _shell:
 		mov bh, 0x00
 		mov bl, 0x07
 		int 0x10
+		pop si
+		pop es
+		pop dx
+		pop cx
+		pop bx
+		pop ax
 		ret
-		
+
 	
 
 		
@@ -289,13 +381,12 @@ _shell:
 		call _display_endl
 
 		pop si
-		 pop es
-		 pop dx
-		 pop cx
-		 pop bx
-		 pop ax
-
-		ret
+		pop es
+		pop dx
+		pop cx
+		pop bx
+		pop ax
+		
 
 		
 	
@@ -308,7 +399,10 @@ _shell:
 	repe	cmpsb
 	jne	_cmd_unknown		;next command
 
-	je _shell_end			;exit from shell
+	mov ax, 5307h
+	mov cx, 3
+ 	mov bx, 1
+	int 15h	
 
 	_cmd_unknown:
 	call _display_endl
@@ -318,8 +412,9 @@ _shell:
 
 	_cmd_done:
 
-	;call _display_endl
+	call _display_endl
 	jmp _shell_begin
+	ret 
 	
 	_shell_end:
 	ret
@@ -585,6 +680,29 @@ _print_dec:
 	mov si,10		; SI is used as the divisor
 	xor cx,cx		; clear CX
 	ret
+	
+_print_char:
+	push ax			; save AX 
+	mov al, dl
+        mov ah, 0x0E		; BIOS teletype acts on printing char
+        mov bh, 0x00
+        mov bl, 0x07
+        int 0x10
+
+	pop ax			; restore AX
+	ret
+	
+_prepare_digits:
+
+	pop dx			; get the digit from DX
+	add dl,0x30		; add 30 to get the ASCII value
+	call _print_char	; print char
+	loop _prepare_digits	; loop till cx == 0
+
+	pop si			; restore SI
+	pop cx			; restore CX
+	pop ax			; restore AX
+	ret                
 
 [SEGMENT .data]
     strWelcomeMsg   db  "Welcome to TLUX_OS Version 1.0.1 - Enter help to display commands", 0x00
@@ -614,25 +732,28 @@ _print_dec:
 	strserialport1		db	"Base I/O address for serial port 1 (communications port 1 - COM 1): ", 0x00
 	strtotalmemory	db	"Total memory: ",0x00
 	strbasememory		db	"Base memory: ",0x00
+	strmemory		db	"Base Memory size: ", 0x00
+	strsmallextended	db	"Extended memory between(1M - 16M): ", 0x00
+	strbigextended		db      "Extended memory above 16M: ", 0x00
 
 	txtVersion		db	"version", 0x00	;messages and other strings
 	msgUnknownCmd		db	"Unknown command or bad file name!", 0x00
 
 [SEGMENT .bss]
-	strUserCmd	resb	256		;buffer for user commands
-	cmdChrCnt	resb	1		;count of characters
+	strUserCmd		resb	256		;buffer for user commands
+	cmdChrCnt		resb	1		;count of characters
 	strCmd0		resb	256		;buffers for the command components
 	strCmd1		resb	256
 	strCmd2		resb	256
 	strCmd3		resb	256
 	strCmd4		resb	256
-	strVendorID	resb	16
-	strcputype	resb	64
-	strcpusno	resb 	64
-	basemem		resb	5
-	extmem1		resb	5
-	extmem2		resb	5
+	strVendorID		resb	16
+	strcputype		resb	64
+	strcpusno		resb 	64
+	basemem		resb	2
+	extmem1		resb	2
+	extmem2		resb	2
+
 
 
 ;********************end of the kernel code********************
-
